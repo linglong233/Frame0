@@ -31,6 +31,12 @@ void TestSession::start() {
     transitionTo(AppState::Waiting);
 }
 
+void TestSession::retryRound() {
+    waitingStartQPC_ = Timer::now();
+    targetDelayTicks_ = generateRandomDelayTicks();
+    transitionTo(AppState::Waiting);
+}
+
 void TestSession::onTrigger(int64_t qpcTime) {
     if (state_ == AppState::Waiting) {
         transitionTo(AppState::Foul);

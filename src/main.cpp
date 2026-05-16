@@ -252,7 +252,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         }
 
         if (s == AppState::Foul) {
-            g_session.start();
+            g_session.retryRound();
             return 0;
         }
 

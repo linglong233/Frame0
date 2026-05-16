@@ -16,14 +16,23 @@ bool Renderer::init(HWND hwnd, bool fullscreen, int width, int height) {
     fullscreen_ = fullscreen;
     width_ = width;
     height_ = height;
-    if (!createDeviceAndSwapChain(hwnd)) return false;
-    if (!createRenderTarget()) return false;
-    if (!createD2DResources()) return false;
+    if (!createDeviceAndSwapChain(hwnd)) {
+        MessageBoxW(nullptr, L"Failed at createDeviceAndSwapChain", L"Renderer Error", MB_OK);
+        return false;
+    }
+    if (!createRenderTarget()) {
+        MessageBoxW(nullptr, L"Failed at createRenderTarget", L"Renderer Error", MB_OK);
+        return false;
+    }
+    if (!createD2DResources()) {
+        MessageBoxW(nullptr, L"Failed at createD2DResources", L"Renderer Error", MB_OK);
+        return false;
+    }
     return true;
 }
 
 bool Renderer::createDeviceAndSwapChain(HWND hwnd) {
-    UINT flags = 0;
+    UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
 #ifdef _DEBUG
     flags |= D3D11_CREATE_DEVICE_DEBUG;
 #endif
@@ -132,7 +141,7 @@ bool Renderer::createD2DResources() {
 
     D2D1_RENDER_TARGET_PROPERTIES rtProps = D2D1::RenderTargetProperties(
         D2D1_RENDER_TARGET_TYPE_DEFAULT,
-        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE));
 
     hr = d2dFactory_->CreateDxgiSurfaceRenderTarget(surface.Get(), rtProps, &d2dTarget_);
     return SUCCEEDED(hr);

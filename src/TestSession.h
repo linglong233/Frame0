@@ -24,6 +24,7 @@ public:
     void setStateChangedCallback(StateChangedCallback cb);
 
     void start();
+    void retryRound();
     void onTrigger(int64_t qpcTime);
     void onEscape();
     void proceedToNextRound();
