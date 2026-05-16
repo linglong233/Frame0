@@ -21,6 +21,7 @@ static Config g_config;
 static HINSTANCE g_hInstance = nullptr;
 static HWND g_hwnd = nullptr;
 static bool g_running = true;
+static bool g_initialized = false;
 
 static int64_t g_resultStartTime_ = 0;
 
@@ -221,7 +222,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     case WM_SIZE: {
         int w = LOWORD(lParam);
         int h = HIWORD(lParam);
-        if (w > 0 && h > 0) {
+        if (w > 0 && h > 0 && g_initialized) {
             g_renderer.resize(w, h);
             g_ui.updateScreenSize(w, h);
         }
@@ -357,11 +358,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
                               style, 0, 0, screenW, screenH,
                               nullptr, nullptr, hInstance, nullptr);
 
-    if (!g_hwnd) return 1;
+    if (!g_hwnd) {
+        MessageBoxW(nullptr, L"Failed to create window", L"Error", MB_OK);
+        return 1;
+    }
 
     ShowWindow(g_hwnd, nCmdShow);
 
-    if (!g_renderer.init(g_hwnd, g_config.fullscreen, screenW, screenH)) return 1;
+    if (!g_renderer.init(g_hwnd, g_config.fullscreen, screenW, screenH)) {
+        MessageBoxW(nullptr, L"Failed to initialize DirectX 11 renderer.\nMake sure your GPU supports D3D11.", L"Error", MB_OK);
+        return 1;
+    }
 
     g_input.init(g_hwnd);
     g_input.setTriggerConfig(g_config.triggerKeyType, g_config.triggerKeyCode);
@@ -376,6 +383,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     g_session.setStateChangedCallback(onStateChanged);
     g_session.transitionTo(AppState::Idle);
     setupIdleButtons();
+
+    g_initialized = true;
 
     MSG msg = {};
     while (g_running) {
