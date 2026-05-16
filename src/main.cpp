@@ -238,6 +238,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (UI::hitTestButtons(g_currentButtons, x, y)) return 0;
         }
 
+        if (s == AppState::Summary) {
+            saveCurrentResults();
+            g_session.transitionTo(AppState::Idle);
+            return 0;
+        }
+
         if (s == AppState::Settings) {
             g_focusedField = -1;
             for (int i = 0; i < static_cast<int>(g_settingsFields.size()); i++) {
@@ -249,11 +255,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     f.focused = false;
                 }
             }
-        }
-
-        if (s == AppState::Foul) {
-            g_session.retryRound();
-            return 0;
         }
 
         if (s == AppState::Summary) {

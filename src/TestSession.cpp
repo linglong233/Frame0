@@ -38,6 +38,10 @@ void TestSession::retryRound() {
 }
 
 void TestSession::onTrigger(int64_t qpcTime) {
+    if (state_ == AppState::Foul) {
+        retryRound();
+        return;
+    }
     if (state_ == AppState::Waiting) {
         transitionTo(AppState::Foul);
         return;
