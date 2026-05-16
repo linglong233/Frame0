@@ -22,6 +22,7 @@ static HINSTANCE g_hInstance = nullptr;
 static HWND g_hwnd = nullptr;
 static bool g_running = true;
 static bool g_initialized = false;
+static int64_t g_summaryStartTime_ = 0;
 
 static int64_t g_resultStartTime_ = 0;
 
@@ -192,12 +193,16 @@ static void onStateChanged(AppState newState) {
     case AppState::Stimulus:
         break;
     case AppState::Foul:
+        g_renderer.setClearColor({ 0.8f, 0.0f, 0.0f, 1.0f });
         break;
     case AppState::Result:
+        g_renderer.setClearColor(Colors::DARK_BG);
         g_resultStartTime_ = Timer::now();
         break;
     case AppState::Summary:
         g_renderer.setClearColor(Colors::DARK_BG);
+        saveCurrentResults();
+        g_summaryStartTime_ = Timer::now();
         break;
     case AppState::Menu:
         g_renderer.setClearColor(Colors::DARK_BG);
@@ -238,8 +243,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (UI::hitTestButtons(g_currentButtons, x, y)) return 0;
         }
 
-        if (s == AppState::Summary) {
-            saveCurrentResults();
+        if (s == AppState::Summary && Timer::elapsedMs(g_summaryStartTime_) >= 1000.0) {
             g_session.transitionTo(AppState::Idle);
             return 0;
         }
@@ -255,12 +259,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     f.focused = false;
                 }
             }
-        }
-
-        if (s == AppState::Summary) {
-            saveCurrentResults();
-            g_session.transitionTo(AppState::Idle);
-            return 0;
         }
 
         return 0;
@@ -295,10 +293,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 g_session.transitionTo(AppState::Menu);
                 setupMenuButtons();
             }
-        }
-        if (wParam == VK_SPACE && g_session.state() == AppState::Summary) {
-            saveCurrentResults();
-            g_session.transitionTo(AppState::Idle);
         }
         if (wParam == VK_F11) {
             if (g_renderer.isFullscreen()) {
@@ -423,7 +417,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
                                    g_session.currentRoundIndex(),
                                    TestSession::ROUNDS_PER_SESSION);
             g_renderer.present();
-            if (Timer::elapsedMs(g_resultStartTime_) >= 1500.0) {
+            if (Timer::elapsedMs(g_resultStartTime_) >= 3000.0) {
                 g_session.proceedToNextRound();
             }
             break;

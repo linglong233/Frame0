@@ -16,18 +16,9 @@ bool Renderer::init(HWND hwnd, bool fullscreen, int width, int height) {
     fullscreen_ = fullscreen;
     width_ = width;
     height_ = height;
-    if (!createDeviceAndSwapChain(hwnd)) {
-        MessageBoxW(nullptr, L"Failed at createDeviceAndSwapChain", L"Renderer Error", MB_OK);
-        return false;
-    }
-    if (!createRenderTarget()) {
-        MessageBoxW(nullptr, L"Failed at createRenderTarget", L"Renderer Error", MB_OK);
-        return false;
-    }
-    if (!createD2DResources()) {
-        MessageBoxW(nullptr, L"Failed at createD2DResources", L"Renderer Error", MB_OK);
-        return false;
-    }
+    if (!createDeviceAndSwapChain(hwnd)) return false;
+    if (!createRenderTarget()) return false;
+    if (!createD2DResources()) return false;
     return true;
 }
 
@@ -171,6 +162,11 @@ void Renderer::presentStimulus() {
     LARGE_INTEGER li;
     QueryPerformanceCounter(&li);
     lastPresentQPC_ = li.QuadPart;
+    // Recreate D2D target after flip — back buffer has rotated
+    d2dTarget_.Reset();
+    rtv_.Reset();
+    createRenderTarget();
+    createD2DResources();
 }
 
 int64_t Renderer::getLastPresentTimeQPC() const {
@@ -196,6 +192,9 @@ void Renderer::present() {
     UINT syncInterval = fullscreen_ ? 1 : 0;
     UINT flags = (!fullscreen_ && tearingSupported_) ? DXGI_PRESENT_ALLOW_TEARING : 0;
     swapChain_->Present(syncInterval, flags);
+    LARGE_INTEGER li;
+    QueryPerformanceCounter(&li);
+    lastPresentQPC_ = li.QuadPart;
 }
 
 void Renderer::drawText(const std::wstring& text, float x, float y, float fontSize,
@@ -256,10 +255,8 @@ void Renderer::toggleFullscreen(HWND hwnd) {
     rtv_.Reset();
     fullscreen_ = !fullscreen_;
     swapChain_->SetFullscreenState(fullscreen_, nullptr);
-    if (!fullscreen_) {
-        UINT resizeFlags = tearingSupported_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
-        swapChain_->ResizeBuffers(0, width_, height_, DXGI_FORMAT_UNKNOWN, resizeFlags);
-    }
+    UINT resizeFlags = tearingSupported_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
+    swapChain_->ResizeBuffers(0, width_, height_, DXGI_FORMAT_UNKNOWN, resizeFlags);
     createRenderTarget();
     createD2DResources();
 }

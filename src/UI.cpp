@@ -70,7 +70,9 @@ void UI::drawWaitingScreen() {
 
 void UI::drawStimulusScreen() {
     renderer_->setClearColor(Colors::GREEN);
-    renderer_->presentStimulus();
+    renderer_->beginUI();
+    renderer_->endUI();
+    renderer_->present();
 }
 
 void UI::drawFoulScreen() {
