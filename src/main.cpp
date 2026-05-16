@@ -22,6 +22,8 @@ static HINSTANCE g_hInstance = nullptr;
 static HWND g_hwnd = nullptr;
 static bool g_running = true;
 
+static int64_t g_resultStartTime_ = 0;
+
 static std::vector<Button> g_currentButtons;
 static std::vector<UI::TextField> g_settingsFields;
 static int g_focusedField = -1;
@@ -191,6 +193,7 @@ static void onStateChanged(AppState newState) {
     case AppState::Foul:
         break;
     case AppState::Result:
+        g_resultStartTime_ = Timer::now();
         break;
     case AppState::Summary:
         g_renderer.setClearColor(Colors::DARK_BG);
@@ -410,8 +413,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
                                    g_session.currentRoundIndex(),
                                    TestSession::ROUNDS_PER_SESSION);
             g_renderer.present();
-            Sleep(1500);
-            g_session.proceedToNextRound();
+            if (Timer::elapsedMs(g_resultStartTime_) >= 1500.0) {
+                g_session.proceedToNextRound();
+            }
             break;
         case AppState::Summary:
             g_ui.drawSummaryScreen(g_session.roundTimes(),

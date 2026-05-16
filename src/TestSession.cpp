@@ -37,7 +37,7 @@ void TestSession::onTrigger(int64_t qpcTime) {
         return;
     }
     if (state_ == AppState::Stimulus) {
-        double rawMs = Timer::elapsedMs(stimulusQPC_);
+        double rawMs = static_cast<double>(qpcTime - stimulusQPC_) * 1000.0 / static_cast<double>(Timer::frequency());
         lastReactionMs_ = rawMs - displayLatencyMs_ - mouseLatencyMs_;
         if (lastReactionMs_ < 0) lastReactionMs_ = 0;
         roundTimes_.push_back(lastReactionMs_);

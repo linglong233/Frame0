@@ -71,4 +71,5 @@ private:
     int width_ = 0;
     int height_ = 0;
     int refreshRate_ = 60;
+    bool tearingSupported_ = false;
 };

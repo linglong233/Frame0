@@ -41,7 +41,6 @@ TEST_F(TestSessionTest, TriggerAfterStimulusGivesResult) {
 TEST_F(TestSessionTest, FiveRoundsReachSummary) {
     session_.start();
     for (int i = 0; i < 5; i++) {
-        std::this_thread::sleep_for(std::chrono::seconds(7));
         session_.setStimulusTimeForTest(Timer::now());
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
         session_.onTrigger(Timer::now());

@@ -1,6 +1,6 @@
 #include "Renderer.h"
 #include "Timer.h"
-#include <dxgi1_4.h>
+#include <dxgi1_5.h>
 #include <cassert>
 
 #pragma comment(lib, "d3d11.lib")
@@ -44,6 +44,18 @@ bool Renderer::createDeviceAndSwapChain(HWND hwnd) {
     ComPtr<IDXGIFactory2> factory;
     adapter->GetParent(IID_PPV_ARGS(&factory));
 
+    // Check tearing support
+    ComPtr<IDXGIFactory5> factory5;
+    factory.As(&factory5);
+    if (factory5) {
+        BOOL allowTearing = FALSE;
+        HRESULT hr = factory5->CheckFeatureSupport(
+            DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allowTearing, sizeof(allowTearing));
+        if (SUCCEEDED(hr) && allowTearing) {
+            tearingSupported_ = true;
+        }
+    }
+
     DXGI_SWAP_CHAIN_DESC1 scDesc = {};
     scDesc.Width = width_;
     scDesc.Height = height_;
@@ -53,7 +65,11 @@ bool Renderer::createDeviceAndSwapChain(HWND hwnd) {
     scDesc.BufferCount = 2;
     scDesc.Scaling = DXGI_SCALING_STRETCH;
     scDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-    scDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+    if (tearingSupported_) {
+        scDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+    } else {
+        scDesc.Flags = 0;
+    }
 
     DXGI_SWAP_CHAIN_FULLSCREEN_DESC fsDesc = {};
     fsDesc.Windowed = !fullscreen_;
@@ -141,7 +157,7 @@ void Renderer::presentStimulus() {
     float color[4] = { clearColor_.r, clearColor_.g, clearColor_.b, clearColor_.a };
     context_->ClearRenderTargetView(rtv_.Get(), color);
     UINT syncInterval = fullscreen_ ? 1 : 0;
-    UINT flags = fullscreen_ ? 0 : DXGI_PRESENT_ALLOW_TEARING;
+    UINT flags = (!fullscreen_ && tearingSupported_) ? DXGI_PRESENT_ALLOW_TEARING : 0;
     swapChain_->Present(syncInterval, flags);
     LARGE_INTEGER li;
     QueryPerformanceCounter(&li);
@@ -169,7 +185,7 @@ void Renderer::endUI() {
 
 void Renderer::present() {
     UINT syncInterval = fullscreen_ ? 1 : 0;
-    UINT flags = fullscreen_ ? 0 : DXGI_PRESENT_ALLOW_TEARING;
+    UINT flags = (!fullscreen_ && tearingSupported_) ? DXGI_PRESENT_ALLOW_TEARING : 0;
     swapChain_->Present(syncInterval, flags);
 }
 
@@ -220,16 +236,20 @@ void Renderer::resize(int width, int height) {
     d2dTarget_.Reset();
     rtv_.Reset();
 
-    swapChain_->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0);
+    UINT resizeFlags = tearingSupported_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
+    swapChain_->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, resizeFlags);
     createRenderTarget();
     createD2DResources();
 }
 
 void Renderer::toggleFullscreen(HWND hwnd) {
+    d2dTarget_.Reset();
+    rtv_.Reset();
     fullscreen_ = !fullscreen_;
     swapChain_->SetFullscreenState(fullscreen_, nullptr);
     if (!fullscreen_) {
-        swapChain_->ResizeBuffers(0, width_, height_, DXGI_FORMAT_UNKNOWN, 0);
+        UINT resizeFlags = tearingSupported_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
+        swapChain_->ResizeBuffers(0, width_, height_, DXGI_FORMAT_UNKNOWN, resizeFlags);
     }
     createRenderTarget();
     createD2DResources();
