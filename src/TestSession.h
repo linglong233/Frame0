@@ -41,13 +41,14 @@ public:
     void setDisplayLatency(double ms);
     void setMouseLatency(double ms);
 
+    void transitionTo(AppState newState);
+
     // Test helpers
     void setStimulusTimeForTest(int64_t qpc);
     void setRoundsForTest(const std::vector<double>& times);
     void calculateStats();
 
 private:
-    void transitionTo(AppState newState);
     int64_t generateRandomDelayTicks();
 
     AppState state_ = AppState::Idle;
