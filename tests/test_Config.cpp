@@ -6,7 +6,7 @@
 class ConfigTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        dir_ = std::filesystem::temp_directory_path() / "reaction_timer_test";
+        dir_ = std::filesystem::temp_directory_path() / "frame0_test";
         std::filesystem::create_directories(dir_);
         path_ = dir_ / "config.json";
     }

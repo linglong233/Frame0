@@ -6,7 +6,7 @@
 class StorageTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        dir_ = std::filesystem::temp_directory_path() / "reaction_timer_storage_test";
+        dir_ = std::filesystem::temp_directory_path() / "frame0_storage_test";
         std::filesystem::create_directories(dir_);
         path_ = dir_ / "history.json";
     }

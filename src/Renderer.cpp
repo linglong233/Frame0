@@ -83,7 +83,10 @@ bool Renderer::createDeviceAndSwapChain(HWND hwnd) {
     sc1.As(&swapChain_);
 
     if (fullscreen_) {
-        swapChain_->SetFullscreenState(true, nullptr);
+        hr = swapChain_->SetFullscreenState(TRUE, nullptr);
+        if (FAILED(hr)) {
+            fullscreen_ = false;
+        }
     }
 
     // Detect refresh rate
@@ -110,25 +113,29 @@ bool Renderer::createRenderTarget() {
 }
 
 bool Renderer::createD2DResources() {
-    D2D1_FACTORY_OPTIONS factoryOpts = {};
+    if (!d2dFactory_) {
+        D2D1_FACTORY_OPTIONS factoryOpts = {};
 #ifdef _DEBUG
-    factoryOpts.debugLevel = D2D1_DEBUG_LEVEL_INFORMATION;
+        factoryOpts.debugLevel = D2D1_DEBUG_LEVEL_INFORMATION;
 #endif
-    HRESULT hr = D2D1CreateFactory(
-        D2D1_FACTORY_TYPE_SINGLE_THREADED,
-        __uuidof(ID2D1Factory),
-        &factoryOpts,
-        reinterpret_cast<void**>(d2dFactory_.GetAddressOf()));
-    if (FAILED(hr)) return false;
+        HRESULT hr = D2D1CreateFactory(
+            D2D1_FACTORY_TYPE_SINGLE_THREADED,
+            __uuidof(ID2D1Factory),
+            &factoryOpts,
+            reinterpret_cast<void**>(d2dFactory_.GetAddressOf()));
+        if (FAILED(hr)) return false;
+    }
 
-    hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
-                             __uuidof(IDWriteFactory),
-                             reinterpret_cast<IUnknown**>(dwFactory_.GetAddressOf()));
-    if (FAILED(hr)) return false;
+    if (!dwFactory_) {
+        HRESULT hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
+                                 __uuidof(IDWriteFactory),
+                                 reinterpret_cast<IUnknown**>(dwFactory_.GetAddressOf()));
+        if (FAILED(hr)) return false;
+    }
 
-    // Create D2D render target from DXGI back buffer surface
     ComPtr<IDXGISurface> surface;
-    swapChain_->GetBuffer(0, IID_PPV_ARGS(&surface));
+    HRESULT hr = swapChain_->GetBuffer(0, IID_PPV_ARGS(&surface));
+    if (FAILED(hr)) return false;
 
     D2D1_RENDER_TARGET_PROPERTIES rtProps = D2D1::RenderTargetProperties(
         D2D1_RENDER_TARGET_TYPE_DEFAULT,
@@ -162,7 +169,7 @@ void Renderer::presentStimulus() {
     LARGE_INTEGER li;
     QueryPerformanceCounter(&li);
     lastPresentQPC_ = li.QuadPart;
-    // Recreate D2D target after flip — back buffer has rotated
+    // Recreate D2D target after flip; the back buffer has rotated.
     d2dTarget_.Reset();
     rtv_.Reset();
     createRenderTarget();
@@ -250,18 +257,56 @@ void Renderer::resize(int width, int height) {
     createD2DResources();
 }
 
-void Renderer::toggleFullscreen(HWND hwnd) {
+bool Renderer::setFullscreen(HWND hwnd, bool fullscreen) {
     d2dTarget_.Reset();
     rtv_.Reset();
-    fullscreen_ = !fullscreen_;
-    swapChain_->SetFullscreenState(fullscreen_, nullptr);
+
+    HRESULT hr = swapChain_->SetFullscreenState(fullscreen ? TRUE : FALSE, nullptr);
+    if (FAILED(hr)) {
+        syncFullscreenState();
+        createRenderTarget();
+        createD2DResources();
+        return false;
+    }
+
+    fullscreen_ = fullscreen;
     UINT resizeFlags = tearingSupported_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
-    swapChain_->ResizeBuffers(0, width_, height_, DXGI_FORMAT_UNKNOWN, resizeFlags);
-    createRenderTarget();
-    createD2DResources();
+    hr = swapChain_->ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, resizeFlags);
+    if (FAILED(hr)) {
+        syncFullscreenState();
+        createRenderTarget();
+        createD2DResources();
+        return false;
+    }
+
+    DXGI_SWAP_CHAIN_DESC desc;
+    swapChain_->GetDesc(&desc);
+    width_ = static_cast<int>(desc.BufferDesc.Width);
+    height_ = static_cast<int>(desc.BufferDesc.Height);
+    return createRenderTarget() && createD2DResources();
+}
+
+void Renderer::toggleFullscreen(HWND hwnd) {
+    setFullscreen(hwnd, !fullscreen_);
+}
+
+bool Renderer::restoreFullscreen(HWND hwnd) {
+    return setFullscreen(hwnd, true);
 }
 
 bool Renderer::isFullscreen() const { return fullscreen_; }
+
+bool Renderer::syncFullscreenState() {
+    if (swapChain_) {
+        BOOL fs = FALSE;
+        HRESULT hr = swapChain_->GetFullscreenState(&fs, nullptr);
+        if (SUCCEEDED(hr)) {
+            fullscreen_ = (fs == TRUE);
+        }
+    }
+    return fullscreen_;
+}
+
 int Renderer::refreshRate() const { return refreshRate_; }
 int Renderer::width() const { return width_; }
 int Renderer::height() const { return height_; }

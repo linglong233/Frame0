@@ -5,16 +5,17 @@ FetchContent_Declare(googletest
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
-add_executable(ReactionTimerTests
+add_executable(Frame0Tests
     test_Timer.cpp
     test_Config.cpp
     test_Storage.cpp
     test_TestSession.cpp
+    test_FullscreenRecovery.cpp
 )
 
-target_link_libraries(ReactionTimerTests
-    PRIVATE reaction_timer_lib gtest_main
+target_link_libraries(Frame0Tests
+    PRIVATE frame0_lib gtest_main
 )
 
 include(GoogleTest)
-gtest_discover_tests(ReactionTimerTests)
+gtest_discover_tests(Frame0Tests)

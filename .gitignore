@@ -1,0 +1,14 @@
+build/
+.omc/
+*.user
+*.suo
+*.obj
+*.pdb
+*.lib
+*.exe
+*.ilk
+*.log
+.vs/
+x64/
+Debug/
+Release/

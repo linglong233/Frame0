@@ -5,6 +5,7 @@
 #include "Input.h"
 #include "UI.h"
 #include "TestSession.h"
+#include "FullscreenRecovery.h"
 
 #include <windowsx.h>
 #include <shlobj.h>
@@ -17,6 +18,7 @@ static Input g_input;
 static UI g_ui;
 static TestSession g_session;
 static Config g_config;
+static FullscreenRecovery g_fullscreenRecovery;
 
 static HINSTANCE g_hInstance = nullptr;
 static HWND g_hwnd = nullptr;
@@ -34,7 +36,7 @@ static bool g_capturingKey = false;
 static std::filesystem::path getConfigPath() {
     char path[MAX_PATH];
     SHGetFolderPathA(nullptr, CSIDL_APPDATA, nullptr, 0, path);
-    auto p = std::filesystem::path(path) / "ReactionTimer";
+    auto p = std::filesystem::path(path) / "Frame0";
     std::filesystem::create_directories(p);
     return p / "config.json";
 }
@@ -42,7 +44,7 @@ static std::filesystem::path getConfigPath() {
 static std::filesystem::path getHistoryPath() {
     char path[MAX_PATH];
     SHGetFolderPathA(nullptr, CSIDL_APPDATA, nullptr, 0, path);
-    auto p = std::filesystem::path(path) / "ReactionTimer";
+    auto p = std::filesystem::path(path) / "Frame0";
     std::filesystem::create_directories(p);
     return p / "history.json";
 }
@@ -215,6 +217,62 @@ static void onStateChanged(AppState newState) {
     }
 }
 
+static void syncClientSizeFromWindow(HWND hwnd) {
+    if (!g_initialized) return;
+
+    RECT client{};
+    if (!GetClientRect(hwnd, &client)) return;
+
+    int w = client.right - client.left;
+    int h = client.bottom - client.top;
+    if (w <= 0 || h <= 0) return;
+
+    g_renderer.resize(w, h);
+    g_ui.updateScreenSize(w, h);
+}
+
+static void applyFullscreenWindowStyle(HWND hwnd) {
+    int sw = GetSystemMetrics(SM_CXSCREEN);
+    int sh = GetSystemMetrics(SM_CYSCREEN);
+    SetWindowLongPtrW(hwnd, GWL_STYLE, WS_POPUP);
+    ShowWindow(hwnd, SW_SHOWNORMAL);
+    SetWindowPos(hwnd, HWND_TOP, 0, 0, sw, sh,
+                 SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+}
+
+static void applyWindowedStyle(HWND hwnd) {
+    SetWindowLongPtrW(hwnd, GWL_STYLE, WS_OVERLAPPEDWINDOW);
+    ShowWindow(hwnd, SW_SHOWNORMAL);
+
+    RECT rc = { 0, 0, 1280, 720 };
+    AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
+    SetWindowPos(hwnd, nullptr, 0, 0,
+                 rc.right - rc.left, rc.bottom - rc.top,
+                 SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+}
+
+static void applyFullscreenAction(FullscreenRecoveryAction action) {
+    if (!g_initialized || !g_hwnd) return;
+
+    switch (action) {
+    case FullscreenRecoveryAction::RestoreFullscreen:
+        applyFullscreenWindowStyle(g_hwnd);
+        if (g_renderer.restoreFullscreen(g_hwnd)) {
+            g_ui.updateScreenSize(g_renderer.width(), g_renderer.height());
+        } else {
+            syncClientSizeFromWindow(g_hwnd);
+        }
+        break;
+    case FullscreenRecoveryAction::ExitFullscreen:
+        g_renderer.setFullscreen(g_hwnd, false);
+        applyWindowedStyle(g_hwnd);
+        syncClientSizeFromWindow(g_hwnd);
+        break;
+    case FullscreenRecoveryAction::None:
+        break;
+    }
+}
+
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     g_input.handleMessage(msg, wParam, lParam);
 
@@ -227,6 +285,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     case WM_SIZE: {
         int w = LOWORD(lParam);
         int h = HIWORD(lParam);
+        // Always process WM_SIZE; DXGI needs this to complete mode switches.
         if (w > 0 && h > 0 && g_initialized) {
             g_renderer.resize(w, h);
             g_ui.updateScreenSize(w, h);
@@ -295,23 +354,27 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             }
         }
         if (wParam == VK_F11) {
-            if (g_renderer.isFullscreen()) {
-                g_renderer.toggleFullscreen(hwnd);
-                SetWindowLongPtrW(hwnd, GWL_STYLE, WS_OVERLAPPEDWINDOW);
-                ShowWindow(hwnd, SW_SHOWNORMAL);
-                RECT rc = { 0, 0, 1280, 720 };
-                AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
-                SetWindowPos(hwnd, nullptr, 0, 0,
-                             rc.right - rc.left, rc.bottom - rc.top,
-                             SWP_NOZORDER | SWP_FRAMECHANGED);
-            } else {
-                int sw = GetSystemMetrics(SM_CXSCREEN);
-                int sh = GetSystemMetrics(SM_CYSCREEN);
-                SetWindowLongPtrW(hwnd, GWL_STYLE, WS_POPUP);
-                SetWindowPos(hwnd, nullptr, 0, 0, sw, sh,
-                             SWP_NOZORDER | SWP_FRAMECHANGED);
-                g_renderer.toggleFullscreen(hwnd);
+            bool actualFullscreen = g_renderer.syncFullscreenState();
+            bool desiredFullscreen = !g_fullscreenRecovery.desiredFullscreen();
+            auto action = g_fullscreenRecovery.setDesiredFullscreen(
+                desiredFullscreen, actualFullscreen);
+            applyFullscreenAction(action);
+            if (!desiredFullscreen && action == FullscreenRecoveryAction::None) {
+                applyWindowedStyle(hwnd);
+                syncClientSizeFromWindow(hwnd);
             }
+        }
+        return 0;
+    }
+
+    case WM_ACTIVATEAPP: {
+        bool active = (wParam != 0);
+        if (g_initialized) {
+            bool actualFullscreen = active ? g_renderer.syncFullscreenState()
+                                           : g_renderer.isFullscreen();
+            auto action = g_fullscreenRecovery.onActivationChanged(
+                active, actualFullscreen);
+            applyFullscreenAction(action);
         }
         return 0;
     }
@@ -335,6 +398,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     Timer::init();
 
     g_config = loadConfig(getConfigPath());
+    g_fullscreenRecovery.setDesiredFullscreen(g_config.fullscreen,
+                                              g_config.fullscreen);
 
     WNDCLASSEXW wc = {};
     wc.cbSize = sizeof(wc);
@@ -342,14 +407,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    wc.lpszClassName = L"ReactionTimer";
+    wc.lpszClassName = L"Frame0";
     RegisterClassExW(&wc);
 
     int screenW = GetSystemMetrics(SM_CXSCREEN);
     int screenH = GetSystemMetrics(SM_CYSCREEN);
 
     DWORD style = g_config.fullscreen ? WS_POPUP : WS_OVERLAPPEDWINDOW;
-    g_hwnd = CreateWindowExW(0, L"ReactionTimer", L"Reaction Timer",
+    g_hwnd = CreateWindowExW(0, L"Frame0", L"Frame0",
                               style, 0, 0, screenW, screenH,
                               nullptr, nullptr, hInstance, nullptr);
 
@@ -380,6 +445,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     setupIdleButtons();
 
     g_initialized = true;
+    applyFullscreenAction(g_fullscreenRecovery.setDesiredFullscreen(
+        g_config.fullscreen, g_renderer.syncFullscreenState()));
 
     MSG msg = {};
     while (g_running) {
@@ -392,6 +459,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
             DispatchMessageW(&msg);
         }
         if (!g_running) break;
+
+        if (!g_fullscreenRecovery.isAppActive()) {
+            Sleep(50);
+            continue;
+        }
+
+        // Skip rendering if minimized
+        if (IsIconic(g_hwnd)) {
+            Sleep(50);
+            continue;
+        }
 
         g_session.update();
 

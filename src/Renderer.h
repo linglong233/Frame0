@@ -43,8 +43,11 @@ public:
     void drawRectangleOutline(float x, float y, float w, float h, const Color& color, float strokeWidth = 1.0f);
 
     void resize(int width, int height);
+    bool setFullscreen(HWND hwnd, bool fullscreen);
     void toggleFullscreen(HWND hwnd);
+    bool restoreFullscreen(HWND hwnd);
     bool isFullscreen() const;
+    bool syncFullscreenState();
     int refreshRate() const;
     int width() const;
     int height() const;
