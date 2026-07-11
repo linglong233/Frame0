@@ -23,6 +23,7 @@ TEST_F(ConfigTest, DefaultConfigValues) {
     EXPECT_EQ(cfg.triggerKeyCode, 0u);
     EXPECT_DOUBLE_EQ(cfg.displayLatencyMs, 0.0);
     EXPECT_DOUBLE_EQ(cfg.mouseLatencyMs, 0.0);
+    EXPECT_EQ(cfg.pollingRate, 0);
     EXPECT_TRUE(cfg.fullscreen);
 }
 
@@ -32,6 +33,7 @@ TEST_F(ConfigTest, SaveAndLoadRoundTrip) {
     original.triggerKeyCode = 0x20;
     original.displayLatencyMs = 5.0;
     original.mouseLatencyMs = 2.0;
+    original.pollingRate = 1000;
     original.fullscreen = false;
 
     saveConfig(original, path_);
@@ -41,6 +43,7 @@ TEST_F(ConfigTest, SaveAndLoadRoundTrip) {
     EXPECT_EQ(loaded.triggerKeyCode, 0x20u);
     EXPECT_DOUBLE_EQ(loaded.displayLatencyMs, 5.0);
     EXPECT_DOUBLE_EQ(loaded.mouseLatencyMs, 2.0);
+    EXPECT_EQ(loaded.pollingRate, 1000);
     EXPECT_FALSE(loaded.fullscreen);
 }
 

@@ -9,6 +9,7 @@ struct Config {
     unsigned triggerKeyCode = 0;
     double displayLatencyMs = 0.0;
     double mouseLatencyMs = 0.0;
+    int pollingRate = 0;  // user-configured mouse polling rate (Hz), 0 = unknown
     bool fullscreen = true;
 };
 

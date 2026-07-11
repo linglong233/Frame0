@@ -30,6 +30,11 @@ public:
     void proceedToNextRound();
     void update();
 
+    // Stimulus time is captured by the renderer right after the stimulus frame
+    // is presented (see Renderer::presentStimulus / getLastPresentTimeQPC).
+    void setStimulusTime(int64_t qpc);
+    bool needsStimulusTime() const;
+
     AppState state() const;
     double lastReactionMs() const;
     int currentRoundIndex() const;
@@ -47,6 +52,7 @@ public:
     // Test helpers
     void setStimulusTimeForTest(int64_t qpc);
     void setRoundsForTest(const std::vector<double>& times);
+    void setTargetDelayTicksForTest(int64_t ticks);
     void calculateStats();
 
 private:
@@ -59,6 +65,7 @@ private:
     int64_t stimulusQPC_ = 0;
     int64_t waitingStartQPC_ = 0;
     int64_t targetDelayTicks_ = 0;
+    bool stimulusTimeCaptured_ = false;
 
     double displayLatencyMs_ = 0;
     double mouseLatencyMs_ = 0;

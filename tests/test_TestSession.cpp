@@ -27,6 +27,24 @@ TEST_F(TestSessionTest, TriggerBeforeStimulusIsFoul) {
     EXPECT_EQ(session_.state(), AppState::Foul);
 }
 
+// Foul state ignores Raw Input triggers: retry is driven explicitly by the UI
+// layer calling retryRound(), so repeated clicks do not bounce the user out of
+// the foul screen before they see it.
+TEST_F(TestSessionTest, FoulStateIgnoresTrigger) {
+    session_.start();
+    session_.onTrigger(Timer::now());
+    ASSERT_EQ(session_.state(), AppState::Foul);
+
+    // Repeated triggers while in Foul must not change state.
+    session_.onTrigger(Timer::now());
+    session_.onTrigger(Timer::now());
+    EXPECT_EQ(session_.state(), AppState::Foul);
+
+    // Explicit retry returns to Waiting.
+    session_.retryRound();
+    EXPECT_EQ(session_.state(), AppState::Waiting);
+}
+
 TEST_F(TestSessionTest, TriggerAfterStimulusGivesResult) {
     session_.start();
     session_.setStimulusTimeForTest(Timer::now());
@@ -62,4 +80,29 @@ TEST_F(TestSessionTest, StatsCalculation) {
 
     EXPECT_NEAR(session_.medianMs(), 205.0, 0.1);
     EXPECT_NEAR(session_.meanMs(), 205.0, 0.1);
+}
+
+// P0 contract: update() transitions Waiting -> Stimulus WITHOUT capturing the
+// stimulus timestamp. The timestamp is supplied separately by setStimulusTime()
+// (called by the renderer right after the stimulus frame is presented). Until
+// then, needsStimulusTime() stays true and no reaction can be computed.
+TEST_F(TestSessionTest, UpdateDoesNotCaptureStimulusTime) {
+    session_.start();
+    EXPECT_FALSE(session_.needsStimulusTime());  // Waiting state
+
+    session_.setTargetDelayTicksForTest(0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    session_.update();
+
+    ASSERT_EQ(session_.state(), AppState::Stimulus);
+    EXPECT_TRUE(session_.needsStimulusTime());   // update() did not set it
+
+    int64_t presentQpc = Timer::now();
+    session_.setStimulusTime(presentQpc);
+    EXPECT_FALSE(session_.needsStimulusTime());  // now captured
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    session_.onTrigger(Timer::now());
+    EXPECT_EQ(session_.state(), AppState::Result);
+    EXPECT_GT(session_.lastReactionMs(), 15.0);
 }

@@ -72,10 +72,12 @@ bool Input::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
     GetRawInputData(reinterpret_cast<HRAWINPUT>(lParam), RID_INPUT, nullptr, &size,
                     sizeof(RAWINPUTHEADER));
     if (size == 0) return false;
+    if (size > sizeof(RAWINPUT)) size = sizeof(RAWINPUT);
 
-    RAWINPUT raw;
-    GetRawInputData(reinterpret_cast<HRAWINPUT>(lParam), RID_INPUT, &raw, &size,
-                    sizeof(RAWINPUTHEADER));
+    RAWINPUT raw{};
+    UINT copied = GetRawInputData(reinterpret_cast<HRAWINPUT>(lParam), RID_INPUT,
+                                  &raw, &size, sizeof(RAWINPUTHEADER));
+    if (copied == 0 || copied == static_cast<UINT>(-1)) return false;
 
     // Capture mode: return next raw input as the bound trigger key
     if (capturing_ && onCaptured_) {

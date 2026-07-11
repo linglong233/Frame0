@@ -70,9 +70,7 @@ void UI::drawWaitingScreen() {
 
 void UI::drawStimulusScreen() {
     renderer_->setClearColor(Colors::GREEN);
-    renderer_->beginUI();
-    renderer_->endUI();
-    renderer_->present();
+    renderer_->presentStimulus();
 }
 
 void UI::drawFoulScreen() {
@@ -81,7 +79,7 @@ void UI::drawFoulScreen() {
                              static_cast<float>(screenH_),
                              { 0.8f, 0.0f, 0.0f, 1.0f });
     drawCenteredText(L"Too early!", screenH_ * 0.4f, 40.0f, Colors::WHITE);
-    drawCenteredText(L"Click to retry", screenH_ * 0.52f, 20.0f, Colors::WHITE);
+    drawCenteredText(L"Click or press SPACE to retry", screenH_ * 0.52f, 20.0f, Colors::WHITE);
     renderer_->endUI();
 }
 

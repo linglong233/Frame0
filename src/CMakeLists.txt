@@ -9,6 +9,8 @@ add_library(frame0_lib STATIC
 
 target_include_directories(frame0_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
+target_compile_options(frame0_lib PRIVATE /utf-8)
+
 target_link_libraries(frame0_lib
     PUBLIC nlohmann_json::nlohmann_json
 )
@@ -24,6 +26,8 @@ add_executable(Frame0
 set_target_properties(Frame0 PROPERTIES
     WIN32_EXECUTABLE TRUE
 )
+
+target_compile_options(Frame0 PRIVATE /utf-8)
 
 target_link_libraries(Frame0
     PRIVATE frame0_lib

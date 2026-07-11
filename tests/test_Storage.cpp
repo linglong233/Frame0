@@ -73,3 +73,24 @@ TEST_F(StorageTest, LoadInvalidJsonReturnsEmpty) {
     auto loaded = loadHistory(path_);
     EXPECT_TRUE(loaded.empty());
 }
+
+TEST_F(StorageTest, HistoryTruncatedToMaxHistory) {
+    SessionResult r;
+    r.rounds = {200.0};
+    r.median = 200.0; r.mean = 200.0; r.stddev = 0.0;
+
+    // Append well past the cap; oldest entries must be dropped (FIFO).
+    for (size_t i = 0; i < MAX_HISTORY + 5; ++i) {
+        r.timestamp = "2026-05-16T14:30:" + std::to_string(i);
+        appendHistory(path_, r);
+    }
+
+    auto loaded = loadHistory(path_);
+    ASSERT_EQ(loaded.size(), MAX_HISTORY);
+    // The first 5 timestamps should have been dropped; the oldest surviving
+    // entry corresponds to i == 5.
+    EXPECT_EQ(loaded.front().timestamp, "2026-05-16T14:30:5");
+    // The newest entry is the last appended.
+    EXPECT_EQ(loaded.back().timestamp,
+              "2026-05-16T14:30:" + std::to_string(MAX_HISTORY + 4));
+}

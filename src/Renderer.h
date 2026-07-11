@@ -2,10 +2,12 @@
 #include <d3d11.h>
 #include <dxgi1_4.h>
 #include <d2d1.h>
+#include <d2d1_1.h>
 #include <dwrite.h>
 #include <wrl/client.h>
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 
 using Microsoft::WRL::ComPtr;
 
@@ -55,18 +57,24 @@ public:
 private:
     bool createDeviceAndSwapChain(HWND hwnd);
     bool createRenderTarget();
-    bool createD2DResources();
-    void releaseBuffers();
-    void recreateBuffers();
+    bool createD2DResources();   // device/context/brush — created once, survive back-buffer changes
+    void refreshD2DTarget();     // bind current back buffer as D2D target bitmap
+    IDWriteTextFormat* getTextFormat(float fontSize);  // cached lookup/create
 
     ComPtr<ID3D11Device> device_;
     ComPtr<ID3D11DeviceContext> context_;
     ComPtr<IDXGISwapChain3> swapChain_;
     ComPtr<ID3D11RenderTargetView> rtv_;
 
-    ComPtr<ID2D1Factory> d2dFactory_;
-    ComPtr<ID2D1RenderTarget> d2dTarget_;
+    ComPtr<ID2D1Factory1> d2dFactory_;
+    ComPtr<ID2D1Device> d2dDevice_;
+    ComPtr<ID2D1DeviceContext> d2dContext_;   // D2D render target (derives from ID2D1RenderTarget)
+    ComPtr<ID2D1Bitmap1> d2dBitmap_;          // back buffer bound as target
     ComPtr<IDWriteFactory> dwFactory_;
+    ComPtr<ID2D1SolidColorBrush> brush_;      // reused via SetColor
+    std::unordered_map<int, ComPtr<IDWriteTextFormat>> textFormats_;  // keyed by fontSize*10
+
+    bool d2dBitmapStale_ = true;
 
     Color clearColor_{ 0, 0, 0, 1 };
     int64_t lastPresentQPC_ = 0;

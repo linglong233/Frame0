@@ -112,6 +112,9 @@ bool Renderer::createRenderTarget() {
     return SUCCEEDED(hr);
 }
 
+// Creates the D2D device/context and the shared brush. These are device-scoped
+// resources: they survive back-buffer rotation, resize, and fullscreen flips,
+// so this is only called once during init (and cheaply re-asserted afterward).
 bool Renderer::createD2DResources() {
     if (!d2dFactory_) {
         D2D1_FACTORY_OPTIONS factoryOpts = {};
@@ -120,7 +123,7 @@ bool Renderer::createD2DResources() {
 #endif
         HRESULT hr = D2D1CreateFactory(
             D2D1_FACTORY_TYPE_SINGLE_THREADED,
-            __uuidof(ID2D1Factory),
+            __uuidof(ID2D1Factory1),
             &factoryOpts,
             reinterpret_cast<void**>(d2dFactory_.GetAddressOf()));
         if (FAILED(hr)) return false;
@@ -133,20 +136,75 @@ bool Renderer::createD2DResources() {
         if (FAILED(hr)) return false;
     }
 
+    // D2D device shares the D3D11 device via DXGI; create once.
+    if (!d2dDevice_) {
+        ComPtr<IDXGIDevice> dxgiDevice;
+        device_.As(&dxgiDevice);
+        HRESULT hr = d2dFactory_->CreateDevice(dxgiDevice.Get(), &d2dDevice_);
+        if (FAILED(hr)) return false;
+        hr = d2dDevice_->CreateDeviceContext(
+            D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &d2dContext_);
+        if (FAILED(hr)) return false;
+    }
+
+    // Brush is bound to the context, not the target bitmap, so it persists.
+    if (!brush_ && d2dContext_) {
+        HRESULT hr = d2dContext_->CreateSolidColorBrush(
+            D2D1::ColorF(1, 1, 1, 1), &brush_);
+        if (FAILED(hr)) return false;
+    }
+
+    // The back-buffer bitmap target is (re)bound lazily by beginUI().
+    d2dBitmapStale_ = true;
+    return true;
+}
+
+// Binds the current back buffer as the D2D render target. Cheap: a bitmap view,
+// not a full render-target recreation. Called after every flip / resize.
+void Renderer::refreshD2DTarget() {
+    if (!d2dContext_ || !swapChain_) return;
+
     ComPtr<IDXGISurface> surface;
     HRESULT hr = swapChain_->GetBuffer(0, IID_PPV_ARGS(&surface));
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) return;
 
-    D2D1_RENDER_TARGET_PROPERTIES rtProps = D2D1::RenderTargetProperties(
-        D2D1_RENDER_TARGET_TYPE_DEFAULT,
-        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE));
+    D2D1_BITMAP_PROPERTIES1 bp = D2D1::BitmapProperties1(
+        D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
 
-    hr = d2dFactory_->CreateDxgiSurfaceRenderTarget(surface.Get(), rtProps, &d2dTarget_);
-    return SUCCEEDED(hr);
+    ComPtr<ID2D1Bitmap1> bitmap;
+    hr = d2dContext_->CreateBitmapFromDxgiSurface(surface.Get(), bp, &bitmap);
+    if (FAILED(hr)) return;
+
+    d2dBitmap_ = bitmap;
+    d2dContext_->SetTarget(d2dBitmap_.Get());
+    d2dBitmapStale_ = false;
+}
+
+IDWriteTextFormat* Renderer::getTextFormat(float fontSize) {
+    if (!dwFactory_) return nullptr;
+    int key = static_cast<int>(fontSize * 10.0f + 0.5f);
+    auto it = textFormats_.find(key);
+    if (it != textFormats_.end()) return it->second.Get();
+
+    ComPtr<IDWriteTextFormat> format;
+    HRESULT hr = dwFactory_->CreateTextFormat(
+        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        fontSize, L"en-US", &format);
+    if (FAILED(hr)) return nullptr;
+
+    IDWriteTextFormat* raw = format.Get();
+    textFormats_[key] = std::move(format);
+    return raw;
 }
 
 void Renderer::shutdown() {
-    d2dTarget_.Reset();
+    brush_.Reset();
+    textFormats_.clear();
+    d2dBitmap_.Reset();
+    d2dContext_.Reset();
+    d2dDevice_.Reset();
     d2dFactory_.Reset();
     dwFactory_.Reset();
     rtv_.Reset();
@@ -159,7 +217,9 @@ void Renderer::setClearColor(const Color& c) {
     clearColor_ = c;
 }
 
-// Stimulus path: clear to the set color, present, record QPC
+// Stimulus path: clear to the set color, present, record QPC. Pure D3D11 —
+// no D2D work on this hot path. The stale D2D bitmap is refreshed lazily by the
+// next beginUI(), well away from the stimulus->input measurement window.
 void Renderer::presentStimulus() {
     float color[4] = { clearColor_.r, clearColor_.g, clearColor_.b, clearColor_.a };
     context_->ClearRenderTargetView(rtv_.Get(), color);
@@ -169,54 +229,56 @@ void Renderer::presentStimulus() {
     LARGE_INTEGER li;
     QueryPerformanceCounter(&li);
     lastPresentQPC_ = li.QuadPart;
-    // Recreate D2D target after flip; the back buffer has rotated.
-    d2dTarget_.Reset();
+    // Back buffer rotated after flip: refresh D3D11 RTV for the next clear.
     rtv_.Reset();
     createRenderTarget();
-    createD2DResources();
+    d2dBitmapStale_ = true;
 }
 
 int64_t Renderer::getLastPresentTimeQPC() const {
-    DXGI_FRAME_STATISTICS stats = {};
-    HRESULT hr = swapChain_->GetFrameStatistics(&stats);
-    if (SUCCEEDED(hr) && stats.SyncQPCTime.QuadPart != 0) {
-        return stats.SyncQPCTime.QuadPart;
-    }
+    // Return the QPC captured immediately after Present returns. This is the
+    // deterministic reference for the stimulus timestamp: it is always >= the
+    // submit time and the residual (submit -> scanout) is what displayLatency
+    // compensates for.
+    //
+    // DXGI_FRAME_STATISTICS::SyncQPCTime is intentionally NOT used here: when
+    // sampled right after Present it reflects the PREVIOUS VBlank (the stimulus
+    // frame has not scanned out yet), which is stale and driver-dependent, and
+    // would inflate the measured reaction time by up to a frame.
     return lastPresentQPC_;
 }
 
 // UI path: D2D1 drawing
 void Renderer::beginUI() {
-    d2dTarget_->BeginDraw();
-    d2dTarget_->Clear(toD2D(clearColor_));
+    if (d2dBitmapStale_) refreshD2DTarget();
+    d2dContext_->BeginDraw();
+    d2dContext_->Clear(toD2D(clearColor_));
 }
 
 void Renderer::endUI() {
-    d2dTarget_->EndDraw();
+    d2dContext_->EndDraw();
 }
 
+// UI present: always VSync-capped so windowed mode does not spin the CPU.
 void Renderer::present() {
-    UINT syncInterval = fullscreen_ ? 1 : 0;
-    UINT flags = (!fullscreen_ && tearingSupported_) ? DXGI_PRESENT_ALLOW_TEARING : 0;
-    swapChain_->Present(syncInterval, flags);
+    swapChain_->Present(1, 0);
     LARGE_INTEGER li;
     QueryPerformanceCounter(&li);
     lastPresentQPC_ = li.QuadPart;
+    d2dBitmapStale_ = true;  // back buffer rotated
 }
 
 void Renderer::drawText(const std::wstring& text, float x, float y, float fontSize,
                         const Color& color, bool centerX, bool centerY) {
-    ComPtr<IDWriteTextFormat> format;
-    dwFactory_->CreateTextFormat(
-        L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
-        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-        fontSize, L"en-US", &format);
+    IDWriteTextFormat* format = getTextFormat(fontSize);
+    if (!format || !brush_) return;
 
-    if (centerX) format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-    if (centerY) format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-
-    ComPtr<ID2D1SolidColorBrush> brush;
-    d2dTarget_->CreateSolidColorBrush(toD2D(color), &brush);
+    // Alignment is reset every call: cached formats retain state between uses.
+    format->SetTextAlignment(centerX ? DWRITE_TEXT_ALIGNMENT_CENTER
+                                     : DWRITE_TEXT_ALIGNMENT_LEADING);
+    format->SetParagraphAlignment(centerY ? DWRITE_PARAGRAPH_ALIGNMENT_CENTER
+                                          : DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+    brush_->SetColor(toD2D(color));
 
     float textW = static_cast<float>(width_) - x * 2;
     float textH = fontSize * 2;
@@ -226,21 +288,21 @@ void Renderer::drawText(const std::wstring& text, float x, float y, float fontSi
         centerX ? static_cast<float>(width_) : x + textW,
         centerY ? static_cast<float>(height_) : y + textH);
 
-    d2dTarget_->DrawText(text.c_str(), static_cast<UINT32>(text.size()),
-                         format.Get(), layoutRect, brush.Get());
+    d2dContext_->DrawText(text.c_str(), static_cast<UINT32>(text.size()),
+                          format, layoutRect, brush_.Get());
 }
 
 void Renderer::fillRectangle(float x, float y, float w, float h, const Color& color) {
-    ComPtr<ID2D1SolidColorBrush> brush;
-    d2dTarget_->CreateSolidColorBrush(toD2D(color), &brush);
-    d2dTarget_->FillRectangle(D2D1::RectF(x, y, x + w, y + h), brush.Get());
+    if (!brush_) return;
+    brush_->SetColor(toD2D(color));
+    d2dContext_->FillRectangle(D2D1::RectF(x, y, x + w, y + h), brush_.Get());
 }
 
 void Renderer::drawRectangleOutline(float x, float y, float w, float h,
                                      const Color& color, float strokeWidth) {
-    ComPtr<ID2D1SolidColorBrush> brush;
-    d2dTarget_->CreateSolidColorBrush(toD2D(color), &brush);
-    d2dTarget_->DrawRectangle(D2D1::RectF(x, y, x + w, y + h), brush.Get(), strokeWidth);
+    if (!brush_) return;
+    brush_->SetColor(toD2D(color));
+    d2dContext_->DrawRectangle(D2D1::RectF(x, y, x + w, y + h), brush_.Get(), strokeWidth);
 }
 
 void Renderer::resize(int width, int height) {
@@ -248,17 +310,18 @@ void Renderer::resize(int width, int height) {
     width_ = width;
     height_ = height;
 
-    d2dTarget_.Reset();
+    // Release all references to the back buffer before ResizeBuffers.
+    d2dBitmap_.Reset();
     rtv_.Reset();
 
     UINT resizeFlags = tearingSupported_ ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
     swapChain_->ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, resizeFlags);
     createRenderTarget();
-    createD2DResources();
+    createD2DResources();  // device/context/brush persist; marks bitmap stale
 }
 
 bool Renderer::setFullscreen(HWND hwnd, bool fullscreen) {
-    d2dTarget_.Reset();
+    d2dBitmap_.Reset();
     rtv_.Reset();
 
     HRESULT hr = swapChain_->SetFullscreenState(fullscreen ? TRUE : FALSE, nullptr);

@@ -33,6 +33,7 @@ Config loadConfig(const std::filesystem::path& path) {
         cfg.triggerKeyCode = j.value("triggerKeyCode", 0u);
         cfg.displayLatencyMs = j.value("displayLatencyMs", 0.0);
         cfg.mouseLatencyMs = j.value("mouseLatencyMs", 0.0);
+        cfg.pollingRate = j.value("pollingRate", 0);
         cfg.fullscreen = j.value("fullscreen", true);
         return cfg;
     } catch (...) {
@@ -47,6 +48,7 @@ void saveConfig(const Config& cfg, const std::filesystem::path& path) {
     j["triggerKeyCode"] = cfg.triggerKeyCode;
     j["displayLatencyMs"] = cfg.displayLatencyMs;
     j["mouseLatencyMs"] = cfg.mouseLatencyMs;
+    j["pollingRate"] = cfg.pollingRate;
     j["fullscreen"] = cfg.fullscreen;
     std::ofstream f(path);
     f << j.dump(2);

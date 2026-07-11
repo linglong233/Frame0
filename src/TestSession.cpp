@@ -26,20 +26,27 @@ void TestSession::start() {
     currentRoundIndex_ = 0;
     lastReactionMs_ = 0;
     medianMs_ = meanMs_ = stddevMs_ = 0;
+    stimulusTimeCaptured_ = false;
     waitingStartQPC_ = Timer::now();
     targetDelayTicks_ = generateRandomDelayTicks();
     transitionTo(AppState::Waiting);
 }
 
 void TestSession::retryRound() {
+    stimulusTimeCaptured_ = false;
     waitingStartQPC_ = Timer::now();
     targetDelayTicks_ = generateRandomDelayTicks();
     transitionTo(AppState::Waiting);
 }
 
 void TestSession::onTrigger(int64_t qpcTime) {
+    // Foul state ignores Raw Input triggers. Retry is driven explicitly by the
+    // UI layer (Win32 WM_LBUTTONDOWN/WM_KEYDOWN) calling retryRound(), so the
+    // user sees the foul screen instead of being bounced into a new round on
+    // the same click that triggered the foul. This keeps the Raw Input path
+    // dedicated to timing (Stimulus) and the Win32 path to UI interaction,
+    // per the dual-input design.
     if (state_ == AppState::Foul) {
-        retryRound();
         return;
     }
     if (state_ == AppState::Waiting) {
@@ -70,6 +77,7 @@ void TestSession::onEscape() {
 
 void TestSession::proceedToNextRound() {
     if (state_ != AppState::Result) return;
+    stimulusTimeCaptured_ = false;
     waitingStartQPC_ = Timer::now();
     targetDelayTicks_ = generateRandomDelayTicks();
     transitionTo(AppState::Waiting);
@@ -79,9 +87,17 @@ void TestSession::update() {
     if (state_ != AppState::Waiting) return;
     int64_t elapsed = Timer::now() - waitingStartQPC_;
     if (elapsed >= targetDelayTicks_) {
-        stimulusQPC_ = Timer::now();
         transitionTo(AppState::Stimulus);
     }
+}
+
+void TestSession::setStimulusTime(int64_t qpc) {
+    stimulusQPC_ = qpc;
+    stimulusTimeCaptured_ = true;
+}
+
+bool TestSession::needsStimulusTime() const {
+    return state_ == AppState::Stimulus && !stimulusTimeCaptured_;
 }
 
 int64_t TestSession::generateRandomDelayTicks() {
@@ -119,10 +135,15 @@ double TestSession::stddevMs() const { return stddevMs_; }
 // Test helpers
 void TestSession::setStimulusTimeForTest(int64_t qpc) {
     stimulusQPC_ = qpc;
+    stimulusTimeCaptured_ = true;
     state_ = AppState::Stimulus;
 }
 
 void TestSession::setRoundsForTest(const std::vector<double>& times) {
     roundTimes_ = times;
     currentRoundIndex_ = static_cast<int>(times.size());
+}
+
+void TestSession::setTargetDelayTicksForTest(int64_t ticks) {
+    targetDelayTicks_ = ticks;
 }

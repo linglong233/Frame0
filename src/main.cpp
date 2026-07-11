@@ -10,6 +10,7 @@
 #include <windowsx.h>
 #include <shlobj.h>
 #include <chrono>
+#include <cmath>
 #include <iomanip>
 #include <sstream>
 
@@ -28,25 +29,52 @@ static int64_t g_summaryStartTime_ = 0;
 
 static int64_t g_resultStartTime_ = 0;
 
+// Guards saveCurrentResults() against re-entry: onStateChanged(Summary) is a
+// single transition, but the flag makes the save idempotent and resilient to
+// future refactors. Reset whenever a fresh session starts.
+static bool g_resultsSaved = false;
+
 static std::vector<Button> g_currentButtons;
 static std::vector<UI::TextField> g_settingsFields;
 static int g_focusedField = -1;
 static bool g_capturingKey = false;
 
+static std::filesystem::path getAppDataDir() {
+    std::filesystem::path base;
+    PWSTR wpath = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &wpath)) && wpath) {
+        base = wpath;
+        CoTaskMemFree(wpath);
+    } else {
+        if (wpath) CoTaskMemFree(wpath);
+        char path[MAX_PATH];
+        SHGetFolderPathA(nullptr, CSIDL_APPDATA, nullptr, 0, path);
+        base = path;
+    }
+    auto dir = base / "Frame0";
+    std::filesystem::create_directories(dir);
+    return dir;
+}
+
 static std::filesystem::path getConfigPath() {
-    char path[MAX_PATH];
-    SHGetFolderPathA(nullptr, CSIDL_APPDATA, nullptr, 0, path);
-    auto p = std::filesystem::path(path) / "Frame0";
-    std::filesystem::create_directories(p);
-    return p / "config.json";
+    return getAppDataDir() / "config.json";
 }
 
 static std::filesystem::path getHistoryPath() {
-    char path[MAX_PATH];
-    SHGetFolderPathA(nullptr, CSIDL_APPDATA, nullptr, 0, path);
-    auto p = std::filesystem::path(path) / "Frame0";
-    std::filesystem::create_directories(p);
-    return p / "history.json";
+    return getAppDataDir() / "history.json";
+}
+
+// Formats a latency value for the settings field: integers show without a
+// decimal point, fractional values keep one decimal. Avoids the silent
+// precision loss that static_cast<int> caused (e.g. 4.5 -> "4").
+static std::wstring formatLatency(double ms) {
+    wchar_t buf[32];
+    if (ms == std::floor(ms)) {
+        swprintf(buf, 32, L"%d", static_cast<int>(ms));
+    } else {
+        swprintf(buf, 32, L"%.1f", ms);
+    }
+    return buf;
 }
 
 static Button makeButton(const std::wstring& text, float cx, float cy,
@@ -112,7 +140,7 @@ static void setupSettingsFields() {
 
     UI::TextField displayField;
     displayField.label = L"Display Input Latency (ms):";
-    displayField.value = std::to_wstring(static_cast<int>(g_config.displayLatencyMs));
+    displayField.value = formatLatency(g_config.displayLatencyMs);
     displayField.x = cx;
     displayField.y = startY;
     displayField.w = 200.0f;
@@ -121,20 +149,29 @@ static void setupSettingsFields() {
 
     UI::TextField mouseField;
     mouseField.label = L"Mouse Click Latency (ms):";
-    mouseField.value = std::to_wstring(static_cast<int>(g_config.mouseLatencyMs));
+    mouseField.value = formatLatency(g_config.mouseLatencyMs);
     mouseField.x = cx;
     mouseField.y = startY + 70.0f;
     mouseField.w = 200.0f;
     mouseField.h = 30.0f;
     mouseField.focused = false;
 
-    g_settingsFields = { displayField, mouseField };
+    UI::TextField pollingField;
+    pollingField.label = L"Mouse Polling Rate (Hz):";
+    pollingField.value = std::to_wstring(g_config.pollingRate);
+    pollingField.x = cx;
+    pollingField.y = startY + 140.0f;
+    pollingField.w = 200.0f;
+    pollingField.h = 30.0f;
+    pollingField.focused = false;
+
+    g_settingsFields = { displayField, mouseField, pollingField };
     g_focusedField = -1;
     g_capturingKey = false;
 
     g_currentButtons.clear();
     float btnCx = static_cast<float>(g_renderer.width()) / 2;
-    float btnY = static_cast<float>(g_renderer.height()) * 0.65f;
+    float btnY = static_cast<float>(g_renderer.height()) * 0.68f;
 
     g_currentButtons.push_back(
         makeButton(L"Bind Trigger Key", btnCx, btnY, 220.0f, 40.0f, []() {
@@ -148,12 +185,15 @@ static void setupSettingsFields() {
         }));
     g_currentButtons.push_back(
         makeButton(L"Save", btnCx, btnY + 55.0f, 220.0f, 40.0f, []() {
-            if (g_settingsFields.size() >= 2) {
+            if (g_settingsFields.size() >= 3) {
                 try {
                     g_config.displayLatencyMs = std::stod(g_settingsFields[0].value);
                 } catch (...) {}
                 try {
                     g_config.mouseLatencyMs = std::stod(g_settingsFields[1].value);
+                } catch (...) {}
+                try {
+                    g_config.pollingRate = std::stoi(g_settingsFields[2].value);
                 } catch (...) {}
             }
             saveConfig(g_config, getConfigPath());
@@ -176,7 +216,7 @@ static void saveCurrentResults() {
     result.mean = g_session.meanMs();
     result.stddev = g_session.stddevMs();
     result.refreshRate = g_renderer.refreshRate();
-    result.pollingRate = 0;
+    result.pollingRate = g_config.pollingRate;
     result.fullscreen = g_renderer.isFullscreen();
     appendHistory(getHistoryPath(), result);
 }
@@ -191,6 +231,7 @@ static void onStateChanged(AppState newState) {
         break;
     case AppState::Waiting:
         g_renderer.setClearColor(Colors::DARK_RED);
+        g_resultsSaved = false;  // fresh round/session: allow next Summary to save
         break;
     case AppState::Stimulus:
         break;
@@ -203,7 +244,10 @@ static void onStateChanged(AppState newState) {
         break;
     case AppState::Summary:
         g_renderer.setClearColor(Colors::DARK_BG);
-        saveCurrentResults();
+        if (!g_resultsSaved) {
+            saveCurrentResults();
+            g_resultsSaved = true;
+        }
         g_summaryStartTime_ = Timer::now();
         break;
     case AppState::Menu:
@@ -307,6 +351,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             return 0;
         }
 
+        // Foul retry goes through Win32 (UI interaction), not Raw Input. This
+        // keeps the foul screen visible until the user explicitly clicks.
+        if (s == AppState::Foul) {
+            g_session.retryRound();
+            return 0;
+        }
+
         if (s == AppState::Settings) {
             g_focusedField = -1;
             for (int i = 0; i < static_cast<int>(g_settingsFields.size()); i++) {
@@ -330,8 +381,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (ch == L'\b') {
                 auto& val = g_settingsFields[g_focusedField].value;
                 if (!val.empty()) val.pop_back();
-            } else if ((ch >= L'0' && ch <= L'9') || ch == L'.') {
+            } else if (ch >= L'0' && ch <= L'9') {
                 g_settingsFields[g_focusedField].value += ch;
+            } else if (ch == L'.') {
+                auto& val = g_settingsFields[g_focusedField].value;
+                if (val.find(L'.') == std::wstring::npos) val += ch;
             }
         }
         return 0;
@@ -351,6 +405,15 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             } else if (s != AppState::Stimulus) {
                 g_session.transitionTo(AppState::Menu);
                 setupMenuButtons();
+            }
+        }
+        if (wParam == VK_SPACE || wParam == VK_RETURN) {
+            AppState s = g_session.state();
+            if (s == AppState::Foul) {
+                g_session.retryRound();
+            } else if (s == AppState::Summary &&
+                       Timer::elapsedMs(g_summaryStartTime_) >= 1000.0) {
+                g_session.transitionTo(AppState::Idle);
             }
         }
         if (wParam == VK_F11) {
@@ -485,6 +548,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
             break;
         case AppState::Stimulus:
             g_ui.drawStimulusScreen();
+            if (g_session.needsStimulusTime()) {
+                g_session.setStimulusTime(g_renderer.getLastPresentTimeQPC());
+            }
             break;
         case AppState::Foul:
             g_ui.drawFoulScreen();

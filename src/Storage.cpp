@@ -50,10 +50,18 @@ void appendHistory(const std::filesystem::path& path, const SessionResult& resul
     std::filesystem::create_directories(path.parent_path());
     auto existing = loadHistory(path);
     existing.push_back(result);
-    json arr = json::array();
-    for (const auto& r : existing) {
-        arr.push_back(resultToJson(r));
+    if (existing.size() > MAX_HISTORY) {
+        existing.erase(existing.begin(),
+                       existing.begin() + (existing.size() - MAX_HISTORY));
     }
-    std::ofstream f(path);
-    f << arr.dump(2);
+    try {
+        json arr = json::array();
+        for (const auto& r : existing) {
+            arr.push_back(resultToJson(r));
+        }
+        std::ofstream f(path);
+        f << arr.dump(2);
+    } catch (...) {
+        // Write failures (disk full, permissions) must not crash the app.
+    }
 }
