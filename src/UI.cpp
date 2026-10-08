@@ -96,7 +96,8 @@ void UI::drawResultScreen(double timeMs, int round, int total) {
 
 void UI::drawSummaryScreen(const std::vector<double>& rounds, double median,
                            double mean, double stddev, int refreshRate,
-                           int pollingRate, bool wasFullscreen) {
+                           int pollingRate, bool wasFullscreen,
+                           double compMs) {
     renderer_->beginUI();
     drawCenteredText(L"Results", screenH_ * 0.08f, 36.0f, Colors::WHITE);
 
@@ -120,6 +121,14 @@ void UI::drawSummaryScreen(const std::vector<double>& rounds, double median,
     swprintf(buf, 128, L"Display: %d Hz  |  Mouse: %d Hz  |  %s",
              refreshRate, pollingRate > 0 ? pollingRate : 0,
              wasFullscreen ? L"Fullscreen" : L"Windowed");
+    drawCenteredText(buf, y, 14.0f, Colors::WHITE);
+
+    y += 24.0f;
+    if (compMs > 0.0) {
+        swprintf(buf, 128, L"Latency compensation: -%.1f ms", compMs);
+    } else {
+        swprintf(buf, 128, L"Latency compensation: none");
+    }
     drawCenteredText(buf, y, 14.0f, Colors::WHITE);
 
     drawCenteredText(L"Press SPACE or click to continue",

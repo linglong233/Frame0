@@ -248,6 +248,11 @@ int64_t Renderer::getLastPresentTimeQPC() const {
     return lastPresentQPC_;
 }
 
+double Renderer::scanoutCompensationMs() const {
+    if (!fullscreen_ && tearingSupported_) return 0.0;
+    return refreshRate_ > 0 ? 1000.0 / static_cast<double>(refreshRate_) : 0.0;
+}
+
 // UI path: D2D1 drawing
 void Renderer::beginUI() {
     if (d2dBitmapStale_) refreshD2DTarget();

@@ -99,6 +99,13 @@ static void setupIdleButtons() {
 
     g_currentButtons.push_back(
         makeButton(L"Start Test", cx, cy, 220.0f, 50.0f, []() {
+            // Session start is the composition point for latency constants:
+            // user latencies come from the current config (settings may have
+            // changed since startup), the scanout residual from the current
+            // display mode. Fixed per session, like a calibrated rig.
+            g_session.setDisplayLatency(g_config.displayLatencyMs);
+            g_session.setMouseLatency(g_config.mouseLatencyMs);
+            g_session.setScanoutCompensationMs(g_renderer.scanoutCompensationMs());
             g_session.start();
             g_currentButtons.clear();
         }));
@@ -512,8 +519,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
 
     g_ui.init(&g_renderer, screenW, screenH);
 
-    g_session.setDisplayLatency(g_config.displayLatencyMs);
-    g_session.setMouseLatency(g_config.mouseLatencyMs);
     g_session.setStateChangedCallback(onStateChanged);
     g_session.transitionTo(AppState::Idle);
     setupIdleButtons();
@@ -594,7 +599,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
                                     g_session.stddevMs(),
                                     g_renderer.refreshRate(),
                                     0,
-                                    g_renderer.isFullscreen());
+                                    g_renderer.isFullscreen(),
+                                    g_session.appliedCompensationMs());
             g_renderer.present();
             break;
         case AppState::Menu:

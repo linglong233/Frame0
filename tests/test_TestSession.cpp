@@ -82,6 +82,24 @@ TEST_F(TestSessionTest, StatsCalculation) {
     EXPECT_NEAR(session_.meanMs(), 205.0, 0.1);
 }
 
+// Compensation model: the recorded time is the raw QPC interval minus the
+// scanout residual (one refresh period in vsync modes, supplied by the
+// renderer) and the user-configured display/mouse latencies.
+TEST_F(TestSessionTest, CompensationSubtractedFromReactionTime) {
+    session_.start();
+    session_.setScanoutCompensationMs(16.667);
+    session_.setDisplayLatency(5.0);
+    session_.setMouseLatency(1.0);
+
+    int64_t freq = Timer::frequency();
+    int64_t t0 = 1000 * freq;
+    session_.setStimulusTimeForTest(t0);
+    session_.onTrigger(t0 + freq / 10);  // 100 ms raw interval
+
+    EXPECT_NEAR(session_.lastReactionMs(), 100.0 - 16.667 - 5.0 - 1.0, 0.01);
+    EXPECT_NEAR(session_.appliedCompensationMs(), 16.667 + 5.0 + 1.0, 0.001);
+}
+
 // P0 contract: update() transitions Waiting -> Stimulus WITHOUT capturing the
 // stimulus timestamp. The timestamp is supplied separately by setStimulusTime()
 // (called by the renderer right after the stimulus frame is presented). Until

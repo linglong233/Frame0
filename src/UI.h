@@ -23,7 +23,8 @@ public:
     void drawResultScreen(double timeMs, int round, int total);
     void drawSummaryScreen(const std::vector<double>& rounds, double median,
                            double mean, double stddev, int refreshRate,
-                           int pollingRate, bool wasFullscreen);
+                           int pollingRate, bool wasFullscreen,
+                           double compMs);
 
     struct TextField {
         std::wstring label;

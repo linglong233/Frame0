@@ -51,6 +51,12 @@ public:
     bool isFullscreen() const;
     bool syncFullscreenState();
     int refreshRate() const;
+    // Deterministic submit->scanout residual of the stimulus frame in ms.
+    // The Waiting loop is vsync-paced, so the stimulus submit lands just
+    // after a VBlank and the frame scans out at the next one (~1 frame).
+    // Windowed + tearing presents immediately (~0); windowed without tearing
+    // goes through DWM composition (~1 frame, approximation).
+    double scanoutCompensationMs() const;
     int width() const;
     int height() const;
 

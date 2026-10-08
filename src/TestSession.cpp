@@ -20,6 +20,10 @@ const std::vector<double>& TestSession::roundTimes() const { return roundTimes_;
 
 void TestSession::setDisplayLatency(double ms) { displayLatencyMs_ = ms; }
 void TestSession::setMouseLatency(double ms) { mouseLatencyMs_ = ms; }
+void TestSession::setScanoutCompensationMs(double ms) { scanoutCompensationMs_ = ms; }
+double TestSession::appliedCompensationMs() const {
+    return scanoutCompensationMs_ + displayLatencyMs_ + mouseLatencyMs_;
+}
 
 void TestSession::start() {
     roundTimes_.clear();
@@ -55,7 +59,7 @@ void TestSession::onTrigger(int64_t qpcTime) {
     }
     if (state_ == AppState::Stimulus) {
         double rawMs = static_cast<double>(qpcTime - stimulusQPC_) * 1000.0 / static_cast<double>(Timer::frequency());
-        lastReactionMs_ = rawMs - displayLatencyMs_ - mouseLatencyMs_;
+        lastReactionMs_ = rawMs - scanoutCompensationMs_ - displayLatencyMs_ - mouseLatencyMs_;
         if (lastReactionMs_ < 0) lastReactionMs_ = 0;
         roundTimes_.push_back(lastReactionMs_);
         currentRoundIndex_++;

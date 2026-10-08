@@ -46,6 +46,11 @@ public:
 
     void setDisplayLatency(double ms);
     void setMouseLatency(double ms);
+    // Auto-derived submit->scanout residual (one refresh period in vsync
+    // modes), supplied by the renderer at session start.
+    void setScanoutCompensationMs(double ms);
+    // Total latency compensation applied to each round (for the summary UI).
+    double appliedCompensationMs() const;
 
     void transitionTo(AppState newState);
 
@@ -69,6 +74,7 @@ private:
 
     double displayLatencyMs_ = 0;
     double mouseLatencyMs_ = 0;
+    double scanoutCompensationMs_ = 0;
     double lastReactionMs_ = 0;
 
     double medianMs_ = 0;
