@@ -547,9 +547,20 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
             g_renderer.present();
             break;
         case AppState::Stimulus:
-            g_ui.drawStimulusScreen();
+            // Present the green frame exactly once — the swap chain retains it
+            // until the next state presents. Re-presenting each iteration would
+            // block this thread in Present(1) until the next VBlank, delaying
+            // WM_INPUT dispatch by up to a refresh period into the measured
+            // reaction time.
             if (g_session.needsStimulusTime()) {
+                g_ui.drawStimulusScreen();
                 g_session.setStimulusTime(g_renderer.getLastPresentTimeQPC());
+            } else {
+                // Frame already on screen: park until input arrives so WM_INPUT
+                // is dispatched the moment it is queued. The short timeout is a
+                // belt-and-braces wake; input wakes immediately regardless.
+                MsgWaitForMultipleObjectsEx(0, nullptr, 20, QS_ALLINPUT,
+                                            MWMO_INPUTAVAILABLE);
             }
             break;
         case AppState::Foul:
