@@ -20,13 +20,13 @@ msbuild Frame0.sln /p:Configuration=Release /p:Platform=x64 /t:Frame0:Rebuild
 
 # Build and run tests
 msbuild Frame0.sln /p:Configuration=Release /p:Platform=x64 /t:Frame0Tests
-Release\tests\Frame0Tests.exe
+tests\Release\Frame0Tests.exe
 
 # Run a single test
-Release\tests\Frame0Tests.exe --gtest_filter=TestSessionTest.FiveRounds
+tests\Release\Frame0Tests.exe --gtest_filter=TestSessionTest.FiveRounds
 ```
 
-Output: `build/src/Release/Frame0.exe`, `build/Release/tests/Frame0Tests.exe`
+Output: `build/src/Release/Frame0.exe`, `build/tests/Release/Frame0Tests.exe`
 
 FetchContent (nlohmann/json, Google Test) requires network access — user in China may need proxy at `127.0.0.1:1080`.
 
@@ -44,9 +44,10 @@ FetchContent (nlohmann/json, Google Test) requires network access — user in Ch
 - Win32 messages (`WM_LBUTTONDOWN`) — UI button clicks in Idle/Menu/Settings states. Never mixed.
 
 **Timing flow**:
-- Start: `Renderer::presentStimulus()` → DXGI `GetFrameStatistics::SyncQPCTime` (falls back to QPC at Present time if unavailable)
+- Start: `Renderer::presentStimulus()` → QPC captured immediately after `Present()` returns; the deterministic submit→scanout residual (~1 refresh period in vsync modes) is auto-compensated via `Renderer::scanoutCompensationMs()`. `GetFrameStatistics::SyncQPCTime` is intentionally NOT used — sampled right after Present it reflects the previous VBlank (stale, driver-dependent; removed in 4ab0fa5).
 - End: `WM_INPUT` handler → `QueryPerformanceCounter` immediately
-- Calculation: `(T_end - T_start) / QPC_freq * 1000 - displayLatency - mouseLatency`
+- Calculation: `(T_end - T_start) / QPC_freq * 1000 - scanoutCompensation - displayLatency - mouseLatency` (latency constants are set from the current config at session start)
+- The stimulus frame is presented exactly ONCE per round. During Stimulus the render loop parks in `MsgWaitForMultipleObjectsEx` so `WM_INPUT` is dispatched the moment it is queued — re-presenting every iteration would block the single-threaded pump in `Present(1)` for up to a refresh period. Do not "optimize" this back into a per-frame present.
 
 **Fullscreen handling**: Exclusive fullscreen via `IDXGISwapChain::SetFullscreenState`. Alt+Tab triggers DXGI fullscreen exit → render loop detects via `syncFullscreenState()` (queries actual DXGI state) → degrades to windowed → `WM_ACTIVATEAPP` auto-restores on return.
 
@@ -55,7 +56,7 @@ FetchContent (nlohmann/json, Google Test) requires network access — user in Ch
 ## Key Files
 
 - `src/main.cpp` — WinMain, WndProc, globals, render loop, state-driven rendering, Alt+Tab recovery
-- `src/Renderer.h/cpp` — D3D11 device/swap chain, DXGI frame stats, D2D1/DirectWrite UI rendering
+- `src/Renderer.h/cpp` — D3D11 device/swap chain (flip model, tearing support), stimulus present + QPC timestamp, D2D1/DirectWrite UI rendering
 - `src/TestSession.h/cpp` — State machine, timing, statistics (median/mean/stddev)
 - `src/Input.h/cpp` — Raw Input registration, trigger matching, key capture mode
 - `src/UI.h/cpp` — All screen drawing (uses Renderer's D2D methods)

@@ -51,7 +51,7 @@ public:
     void setScanoutCompensationMs(double ms);
     // Total latency compensation applied to each round (for the summary UI).
     double appliedCompensationMs() const;
-    // Rounds whose compensated time went below zero and was clamped to 0 —
+    // Rounds whose compensated time went below zero and was clamped to 0 -
     // over-compensation the user should be warned about, not silently shown.
     int clampedRounds() const;
 
