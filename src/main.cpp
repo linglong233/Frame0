@@ -9,10 +9,13 @@
 
 #include <windowsx.h>
 #include <shlobj.h>
+#include <avrt.h>
 #include <chrono>
 #include <cmath>
 #include <iomanip>
 #include <sstream>
+
+#pragma comment(lib, "avrt.lib")
 
 static Renderer g_renderer;
 static Input g_input;
@@ -460,6 +463,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     g_hInstance = hInstance;
     Timer::init();
 
+    // Scheduling guard for the measured window: keep the render/input thread
+    // from being preempted while a reaction is in flight. Best effort — a
+    // failure just falls back to normal scheduling. Restored on exit below.
+    DWORD savedPriorityClass = GetPriorityClass(GetCurrentProcess());
+    SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
+    DWORD mmcssIndex = 0;
+    HANDLE mmcssTask = AvSetMmThreadCharacteristicsW(L"Games", &mmcssIndex);
+
     g_config = loadConfig(getConfigPath());
     g_fullscreenRecovery.setDesiredFullscreen(g_config.fullscreen,
                                               g_config.fullscreen);
@@ -603,5 +614,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     }
 
     g_renderer.shutdown();
+    if (mmcssTask) AvRevertMmThreadCharacteristics(mmcssTask);
+    if (savedPriorityClass != 0) {
+        SetPriorityClass(GetCurrentProcess(), savedPriorityClass);
+    }
     return 0;
 }
