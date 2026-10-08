@@ -32,6 +32,15 @@ static int64_t g_summaryStartTime_ = 0;
 
 static int64_t g_resultStartTime_ = 0;
 
+static int64_t g_foulStartTime_ = 0;
+// Win32 retry/escape actions in Foul are accepted only after the foul screen
+// has been up this long. The legacy message of the SAME physical input that
+// triggered the foul (WM_INPUT is queued before WM_LBUTTONDOWN/WM_KEYDOWN)
+// arrives microseconds after the Foul transition and must not dismiss the
+// screen before the user ever sees it. Message ordering across categories is
+// not guaranteed by the OS, so the guard is time-based, not order-based.
+static constexpr double kFoulInputGuardMs = 300.0;
+
 // Guards saveCurrentResults() against re-entry: onStateChanged(Summary) is a
 // single transition, but the flag makes the save idempotent and resilient to
 // future refactors. Reset whenever a fresh session starts.
@@ -261,6 +270,7 @@ static void onStateChanged(AppState newState) {
     case AppState::Foul:
         g_renderer.setClearColor({ 0.8f, 0.0f, 0.0f, 1.0f });
         setCursorHiddenForTest(true);
+        g_foulStartTime_ = Timer::now();
         break;
     case AppState::Result:
         g_renderer.setClearColor(Colors::DARK_BG);
@@ -380,10 +390,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             return 0;
         }
 
-        // Foul retry goes through Win32 (UI interaction), not Raw Input. This
-        // keeps the foul screen visible until the user explicitly clicks.
+        // Foul retry goes through Win32 (UI interaction), not Raw Input. The
+        // time guard keeps the foul screen visible despite the legacy message
+        // of the same click that triggered the foul (see kFoulInputGuardMs).
         if (s == AppState::Foul) {
-            g_session.retryRound();
+            if (Timer::elapsedMs(g_foulStartTime_) >= kFoulInputGuardMs) {
+                g_session.retryRound();
+            }
             return 0;
         }
 
@@ -428,9 +441,16 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 g_capturingKey = false;
                 g_session.transitionTo(AppState::Idle);
                 setupIdleButtons();
-            } else if (s == AppState::Waiting || s == AppState::Foul) {
+            } else if (s == AppState::Waiting) {
                 g_session.onEscape();
                 setupIdleButtons();
+            } else if (s == AppState::Foul) {
+                // Guarded: if ESC is the trigger key, the same-press KEYDOWN
+                // must not abort the session before the foul screen is seen.
+                if (Timer::elapsedMs(g_foulStartTime_) >= kFoulInputGuardMs) {
+                    g_session.onEscape();
+                    setupIdleButtons();
+                }
             } else if (s != AppState::Stimulus) {
                 g_session.transitionTo(AppState::Menu);
                 setupMenuButtons();
@@ -439,7 +459,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         if (wParam == VK_SPACE || wParam == VK_RETURN) {
             AppState s = g_session.state();
             if (s == AppState::Foul) {
-                g_session.retryRound();
+                // Same guard as the click retry (SPACE/RETURN may be the
+                // trigger key; their own KEYDOWN would dismiss the foul).
+                if (Timer::elapsedMs(g_foulStartTime_) >= kFoulInputGuardMs) {
+                    g_session.retryRound();
+                }
             } else if (s == AppState::Summary &&
                        Timer::elapsedMs(g_summaryStartTime_) >= 1000.0) {
                 g_session.transitionTo(AppState::Idle);
