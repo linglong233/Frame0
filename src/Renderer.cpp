@@ -23,7 +23,10 @@ bool Renderer::init(HWND hwnd, bool fullscreen, int width, int height) {
 }
 
 bool Renderer::createDeviceAndSwapChain(HWND hwnd) {
-    UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+    // All D3D/D2D calls happen on the main thread; SINGLETHREADED drops the
+    // runtime's internal locking.
+    UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT
+               | D3D11_CREATE_DEVICE_SINGLETHREADED;
 #ifdef _DEBUG
     flags |= D3D11_CREATE_DEVICE_DEBUG;
 #endif

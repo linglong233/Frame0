@@ -24,12 +24,15 @@ void TestSession::setScanoutCompensationMs(double ms) { scanoutCompensationMs_ =
 double TestSession::appliedCompensationMs() const {
     return scanoutCompensationMs_ + displayLatencyMs_ + mouseLatencyMs_;
 }
+int TestSession::clampedRounds() const { return clampedRounds_; }
 
 void TestSession::start() {
     roundTimes_.clear();
+    roundTimes_.reserve(ROUNDS_PER_SESSION);
     currentRoundIndex_ = 0;
     lastReactionMs_ = 0;
     medianMs_ = meanMs_ = stddevMs_ = 0;
+    clampedRounds_ = 0;
     stimulusTimeCaptured_ = false;
     waitingStartQPC_ = Timer::now();
     targetDelayTicks_ = generateRandomDelayTicks();
@@ -60,7 +63,10 @@ void TestSession::onTrigger(int64_t qpcTime) {
     if (state_ == AppState::Stimulus) {
         double rawMs = static_cast<double>(qpcTime - stimulusQPC_) * 1000.0 / static_cast<double>(Timer::frequency());
         lastReactionMs_ = rawMs - scanoutCompensationMs_ - displayLatencyMs_ - mouseLatencyMs_;
-        if (lastReactionMs_ < 0) lastReactionMs_ = 0;
+        if (lastReactionMs_ < 0) {
+            clampedRounds_++;
+            lastReactionMs_ = 0;
+        }
         roundTimes_.push_back(lastReactionMs_);
         currentRoundIndex_++;
 

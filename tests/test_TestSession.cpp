@@ -100,6 +100,26 @@ TEST_F(TestSessionTest, CompensationSubtractedFromReactionTime) {
     EXPECT_NEAR(session_.appliedCompensationMs(), 16.667 + 5.0 + 1.0, 0.001);
 }
 
+// Over-compensation must not be silently erased: rounds whose compensated
+// time goes below zero are clamped to 0 and counted for a summary warning.
+TEST_F(TestSessionTest, OverCompensationClampIsCounted) {
+    session_.start();
+    session_.setScanoutCompensationMs(16.667);
+    session_.setDisplayLatency(1000.0);
+    session_.setMouseLatency(0.0);
+
+    int64_t freq = Timer::frequency();
+    int64_t t0 = 1000 * freq;
+    session_.setStimulusTimeForTest(t0);
+    session_.onTrigger(t0 + freq / 10);  // 100 ms raw vs 1016.667 ms comp
+
+    EXPECT_EQ(session_.lastReactionMs(), 0.0);
+    EXPECT_EQ(session_.clampedRounds(), 1);
+
+    session_.start();
+    EXPECT_EQ(session_.clampedRounds(), 0);  // reset per session
+}
+
 // P0 contract: update() transitions Waiting -> Stimulus WITHOUT capturing the
 // stimulus timestamp. The timestamp is supplied separately by setStimulusTime()
 // (called by the renderer right after the stimulus frame is presented). Until

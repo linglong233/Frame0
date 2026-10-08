@@ -231,29 +231,45 @@ static void saveCurrentResults() {
     appendHistory(getHistoryPath(), result);
 }
 
+// Cursor is hidden across the measured states (Waiting/Stimulus/Foul).
+// ShowCursor uses a display counter, so the guard keeps hide/show calls
+// strictly balanced across arbitrary state transitions.
+static bool g_cursorHidden = false;
+static void setCursorHiddenForTest(bool hidden) {
+    if (hidden == g_cursorHidden) return;
+    ShowCursor(hidden ? FALSE : TRUE);
+    g_cursorHidden = hidden;
+}
+
 static void onStateChanged(AppState newState) {
     g_currentButtons.clear();
 
     switch (newState) {
     case AppState::Idle:
         g_renderer.setClearColor(Colors::DARK_BG);
+        setCursorHiddenForTest(false);
         setupIdleButtons();
         break;
     case AppState::Waiting:
         g_renderer.setClearColor(Colors::DARK_RED);
+        setCursorHiddenForTest(true);
         g_resultsSaved = false;  // fresh round/session: allow next Summary to save
         break;
     case AppState::Stimulus:
+        setCursorHiddenForTest(true);
         break;
     case AppState::Foul:
         g_renderer.setClearColor({ 0.8f, 0.0f, 0.0f, 1.0f });
+        setCursorHiddenForTest(true);
         break;
     case AppState::Result:
         g_renderer.setClearColor(Colors::DARK_BG);
+        setCursorHiddenForTest(false);
         g_resultStartTime_ = Timer::now();
         break;
     case AppState::Summary:
         g_renderer.setClearColor(Colors::DARK_BG);
+        setCursorHiddenForTest(false);
         if (!g_resultsSaved) {
             saveCurrentResults();
             g_resultsSaved = true;
@@ -262,10 +278,12 @@ static void onStateChanged(AppState newState) {
         break;
     case AppState::Menu:
         g_renderer.setClearColor(Colors::DARK_BG);
+        setCursorHiddenForTest(false);
         setupMenuButtons();
         break;
     case AppState::Settings:
         g_renderer.setClearColor(Colors::DARK_BG);
+        setCursorHiddenForTest(false);
         setupSettingsFields();
         break;
     }
@@ -332,6 +350,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
     switch (msg) {
     case WM_DESTROY:
+        setCursorHiddenForTest(false);
         g_running = false;
         PostQuitMessage(0);
         return 0;
@@ -598,9 +617,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
                                     g_session.meanMs(),
                                     g_session.stddevMs(),
                                     g_renderer.refreshRate(),
-                                    0,
+                                    g_config.pollingRate,
                                     g_renderer.isFullscreen(),
-                                    g_session.appliedCompensationMs());
+                                    g_session.appliedCompensationMs(),
+                                    g_session.clampedRounds());
             g_renderer.present();
             break;
         case AppState::Menu:

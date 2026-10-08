@@ -97,7 +97,7 @@ void UI::drawResultScreen(double timeMs, int round, int total) {
 void UI::drawSummaryScreen(const std::vector<double>& rounds, double median,
                            double mean, double stddev, int refreshRate,
                            int pollingRate, bool wasFullscreen,
-                           double compMs) {
+                           double compMs, int clampedRounds) {
     renderer_->beginUI();
     drawCenteredText(L"Results", screenH_ * 0.08f, 36.0f, Colors::WHITE);
 
@@ -130,6 +130,13 @@ void UI::drawSummaryScreen(const std::vector<double>& rounds, double median,
         swprintf(buf, 128, L"Latency compensation: none");
     }
     drawCenteredText(buf, y, 14.0f, Colors::WHITE);
+
+    if (clampedRounds > 0) {
+        y += 24.0f;
+        swprintf(buf, 128, L"Warning: %d round(s) clamped to 0 - latency settings too high",
+                 clampedRounds);
+        drawCenteredText(buf, y, 14.0f, Colors::WHITE);
+    }
 
     drawCenteredText(L"Press SPACE or click to continue",
                      screenH_ * 0.9f, 16.0f, Colors::WHITE);

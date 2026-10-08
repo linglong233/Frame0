@@ -24,7 +24,7 @@ public:
     void drawSummaryScreen(const std::vector<double>& rounds, double median,
                            double mean, double stddev, int refreshRate,
                            int pollingRate, bool wasFullscreen,
-                           double compMs);
+                           double compMs, int clampedRounds);
 
     struct TextField {
         std::wstring label;
